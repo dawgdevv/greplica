@@ -2,7 +2,6 @@
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { createLocalKnowledgeGraphService } from "../../libs/knowledge-graph/service.js";
-import type { MemoryCommitProposal } from "../../libs/knowledge-graph/proposal.js";
 import { detectRepoContext } from "./repo-context.js";
 
 async function main(argv: string[]): Promise<void> {
@@ -69,7 +68,7 @@ async function main(argv: string[]): Promise<void> {
   if (area === "proposal" && action === "apply") {
     const file = requireFile(rest[0], "Usage: ec proposal apply <file>");
     const repo = detectRepoContext();
-    const proposal = readProposal(file) as MemoryCommitProposal;
+    const proposal = readProposal(file);
     const result = service.applyProposal(repo, proposal);
     console.log("Applied proposal to working memory.");
     console.log(`Memory commit: ${result.memory_commit_id}`);

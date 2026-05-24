@@ -1,4 +1,4 @@
-import type { MemoryCommitProposal } from "./proposal.js";
+import { normalizeProposal } from "./proposal.js";
 import { validateProposal, type ProposalValidationResult } from "./validate-proposal.js";
 import type { Claim } from "./claim.js";
 import type { Edge } from "./edge.js";
@@ -88,11 +88,12 @@ export class KnowledgeGraphService {
 
   validateProposal(input: RepoRef, proposal: unknown): ProposalValidationResult {
     this.ensureInitialized(input);
-    return validateProposal(proposal, this.repository);
+    return validateProposal(normalizeProposal(proposal, this.repository), this.repository);
   }
 
-  applyProposal(input: RepoRef, proposal: MemoryCommitProposal): ApplyProposalResult {
-    const validation = this.validateProposal(input, proposal);
+  applyProposal(input: RepoRef, proposal: unknown): ApplyProposalResult {
+    const normalizedProposal = normalizeProposal(proposal, this.repository);
+    const validation = this.validateProposal(input, normalizedProposal);
     if (!validation.valid) {
       throw new Error(`Proposal is invalid:\n${validation.errors.map((error) => `- ${error}`).join("\n")}`);
     }
@@ -101,21 +102,21 @@ export class KnowledgeGraphService {
     const working = this.repository.requireWorkingScope(repo.id);
     const memoryCommit = this.repository.createMemoryCommit({
       scope_id: working.id,
-      title: proposal.title,
-      summary: proposal.summary,
+      title: normalizedProposal.title,
+      summary: normalizedProposal.summary,
     });
 
-    this.repository.createProposalRecords(working.id, memoryCommit.id, proposal);
+    this.repository.createProposalRecords(working.id, memoryCommit.id, normalizedProposal);
 
     return {
       memory_commit_id: memoryCommit.id,
       scope_id: working.id,
       created: {
-        components: proposal.creates.components?.length ?? 0,
-        flows: proposal.creates.flows?.length ?? 0,
-        claims: proposal.creates.claims?.length ?? 0,
-        sources: proposal.creates.sources?.length ?? 0,
-        edges: proposal.creates.edges?.length ?? 0,
+        components: normalizedProposal.creates.components?.length ?? 0,
+        flows: normalizedProposal.creates.flows?.length ?? 0,
+        claims: normalizedProposal.creates.claims?.length ?? 0,
+        sources: normalizedProposal.creates.sources?.length ?? 0,
+        edges: normalizedProposal.creates.edges?.length ?? 0,
       },
     };
   }

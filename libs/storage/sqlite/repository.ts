@@ -248,6 +248,13 @@ export class SqliteRepository {
     return row !== undefined;
   }
 
+  subjectType(id: string): GraphObjectType | undefined {
+    for (const type of ["component", "flow", "claim", "edge", "source"] as const) {
+      if (this.subjectExists(type, id)) return type;
+    }
+    return undefined;
+  }
+
   private createMembership(
     scopeId: string,
     subjectType: "component" | "flow" | "claim" | "edge",
