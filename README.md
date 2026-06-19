@@ -1,8 +1,6 @@
 <div align="center">
 
-<img alt="Greplica logo" src="docs/assets/greplica-logo.svg" width="140">
-
-# Greplica
+<img alt="Greplica" src="docs/assets/greplica-arcade-font2.png" width="420">
 
 ### Long-term, searchable `AGENTS.md` for coding agents
 
