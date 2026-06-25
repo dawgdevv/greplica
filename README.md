@@ -5,7 +5,6 @@
 ### Persistent, searchable engineering memory for AI coding agents
 
 <p>
-  <a href="https://autoloops.ai/greplica"><img alt="Website" src="https://img.shields.io/badge/website-autoloops.ai%2Fgreplica-111111"></a>
   <a href="https://www.npmjs.com/package/greplica"><img alt="npm package" src="https://img.shields.io/npm/v/greplica?color=111111"></a>
   <img alt="Agents" src="https://img.shields.io/badge/agents-Codex%20%7C%20Claude%20Code-2563eb">
   <img alt="Storage" src="https://img.shields.io/badge/storage-local%20SQLite-475569">
@@ -29,7 +28,7 @@ That's because it is re-learrning context. Every new session, your agent wastes 
 
 If you want your agent to handle the entire setup in one step, paste this:
 
-```txt
+`````txt
 Install Greplica for this repo.
 
 First install the CLI:
@@ -65,7 +64,7 @@ Then tell me how to use Greplica:
 - Tell me that near the end of a useful session, I should run "Use greplica-update-working-memory for this session." so decisions, changed flows, constraints, and follow-up work are stored.
 - Tell me that OpenAI embeddings are also available later by rerunning `greplica install --platform <codex-or-claude-or-opencode> --embedding openai`.
 - IMPORTANT: tell me to add the Greplica guidance block manually to AGENTS.md or CLAUDE.md if I want the agent to keep using Greplica automatically.
-```
+`````
 
 This bootstraps a graph mapping your entire project, ready to store important context you build while working.
 
