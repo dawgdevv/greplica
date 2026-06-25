@@ -128,6 +128,18 @@ The agent gets the relevant file anchors, the decision trail, and the constraint
 
 ---
 
+## Normal Session Workflow
+
+
+| When                    | Ask your agent                                         | What happens                                                               |
+| ----------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------- |
+| Before starting a task  | (automatic if guidance block is in place)              | Agent runs `greplica graph context "<task>"` before broad file exploration |
+| During work             | Agent uses context to navigate                         | Relevant components, flows, and past decisions surface immediately         |
+| End of a useful session | `Use greplica-update-working-memory for this session.` | Decisions, changed flows, constraints, and follow-up work are saved        |
+
+
+---
+
 ## Quick Start (manual)
 
 ### 1. Install the CLI
@@ -166,18 +178,6 @@ Use greplica-bootstrap for this repo.
 ```
 
 The agent reads your repository shallowly - README, config files, key entrypoints, type definitions - and writes a structured memory proposal. After validation and apply, the graph is ready.
-
----
-
-## Normal Session Workflow
-
-
-| When                    | Ask your agent                                         | What happens                                                               |
-| ----------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------- |
-| Before starting a task  | (automatic if guidance block is in place)              | Agent runs `greplica graph context "<task>"` before broad file exploration |
-| During work             | Agent uses context to navigate                         | Relevant components, flows, and past decisions surface immediately         |
-| End of a useful session | `Use greplica-update-working-memory for this session.` | Decisions, changed flows, constraints, and follow-up work are saved        |
-
 
 ---
 
