@@ -5,7 +5,7 @@ import { isatty } from "node:tty";
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { createLocalKnowledgeGraphService, KnowledgeGraphService } from "../../libs/knowledge-graph/service.js";
-import type { KnowledgeGraphService as KnowledgeGraphServiceType, RepoRef } from "../../libs/knowledge-graph/service.js";
+import type { ClaimAnchorAuditResult, RepoRef } from "../../libs/knowledge-graph/service.js";
 import { envVarSource, loadRepoEnv, type LoadedRepoEnv } from "../../libs/env/load-local-env.js";
 import {
   ensureGreplicaConfig,
@@ -31,7 +31,7 @@ interface CommandContext {
   repo: RepoRef;
   env: LoadedRepoEnv;
   config: GreplicaConfig;
-  service: KnowledgeGraphServiceType;
+  service: KnowledgeGraphService;
 }
 
 async function main(argv: string[]): Promise<void> {
@@ -130,6 +130,13 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
 
+  if (area === "graph" && action === "audit" && rest[0] === "anchors") {
+    const { repo, service } = createCommandContext();
+    const result = await service.auditCodeAnchors(repo);
+    printAnchorAudit(result);
+    return;
+  }
+
   if (area === "proposal" && action === "validate") {
     const file = requireFile(rest[0], "Usage: greplica proposal validate <file>");
     const { repo, service } = createCommandContext();
@@ -168,6 +175,31 @@ async function main(argv: string[]): Promise<void> {
 
   printHelp();
   process.exitCode = area === undefined ? 0 : 1;
+}
+
+function printAnchorAudit(result: ClaimAnchorAuditResult): void {
+  console.log("Code anchor audit");
+  console.log("");
+  printAuditSection("Missing anchors", result.missing_anchors, (issue) => issue.claim_id);
+  printAuditSection("Invalid files", result.missing_files, (issue) => `${issue.claim_id} -> ${formatAuditAnchor(issue.anchor)}`);
+  printAuditSection("Missing symbols", result.missing_symbols, (issue) => `${issue.claim_id} -> ${formatAuditAnchor(issue.anchor)}`);
+  printAuditSection("Ambiguous symbols", result.ambiguous_symbols, (issue) => `${issue.claim_id} -> ${formatAuditAnchor(issue.anchor)}`);
+  printAuditSection("Unsupported languages", result.unsupported_languages, (issue) => `${issue.claim_id} -> ${formatAuditAnchor(issue.anchor)}`);
+}
+
+function printAuditSection<T>(title: string, items: T[], render: (item: T) => string): void {
+  console.log(`${title}:`);
+  if (items.length === 0) {
+    console.log("- None.");
+  } else {
+    for (const item of items) console.log(`- ${render(item)}`);
+  }
+  console.log("");
+}
+
+function formatAuditAnchor(anchor: { file: string; symbol?: string } | undefined): string {
+  if (anchor === undefined) return "<missing>";
+  return anchor.symbol === undefined ? anchor.file : `${anchor.file}#${anchor.symbol}`;
 }
 
 function createCommandContext(): CommandContext {
@@ -638,6 +670,7 @@ function printHelp(): void {
   ${cli} doctor [--check-embeddings]
   ${cli} graph read
   ${cli} graph context <query> [--debug]
+  ${cli} graph audit anchors
   ${cli} graph export <dir>
   ${cli} graph view [--out <file>] [--no-open]
   ${cli} session mark-memory-current --session-ref <ref>

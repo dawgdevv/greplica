@@ -15,11 +15,15 @@ import { float32ArrayToBuffer, bufferToFloat32Array, cosineSimilarity } from "./
 import { scoreBm25 } from "./bm25.js";
 import { applyGraphRanking } from "./graph-rank.js";
 import { rankContextDocuments, roundScore, selectRankedDocuments, type RankedContextDocument, type SemanticScoreEntry } from "./rank.js";
-import type { ClaimContextResult, ClaimEvidenceResult, ComponentContextResult, EmbeddingStatus, FlowContextResult, GraphContextResult, RankedContextDebugResult, RankedGraphContextResult } from "./types.js";
+import type { ClaimContextResult, ClaimEvidenceResult, ComponentContextResult, EmbeddingStatus, FlowContextResult, GraphContextResult, RankedContextDebugResult } from "./types.js";
+import { rankPacketResults, roundRankedSignals, selectGraphObjects } from "./packet-rank.js";
+import { CodeAnchorResolver } from "../code-anchors/resolver.js";
+import type { ResolvedCodeAnchor } from "../code-anchors/types.js";
 
 export interface BuildGraphContextOptions {
   warnOnCreatedEmbeddings?: boolean;
   config?: GraphContextConfig;
+  repoRoot?: string;
 }
 
 interface ExistingEmbedding {
@@ -28,6 +32,8 @@ interface ExistingEmbedding {
 }
 
 export class GraphContextBuilder {
+  private readonly codeAnchorResolver = new CodeAnchorResolver();
+
   constructor(private readonly repository: SqliteRepository) {}
 
   async build(repoId: string, graph: GraphReadResult, query: string, options: BuildGraphContextOptions = {}): Promise<GraphContextResult> {
@@ -44,19 +50,18 @@ export class GraphContextBuilder {
     }
 
     const queryEmbedding = await embedder.embed(query);
-    const ranked = applyGraphRanking(
-      {
-        claims: this.rankDocuments(repoId, query, queryEmbedding, claimDocuments, config),
-        components: this.rankDocuments(repoId, query, queryEmbedding, componentDocuments, config),
-        flows: this.rankDocuments(repoId, query, queryEmbedding, flowDocuments, config),
-      },
-      graph,
-      config,
-    );
-    const selectedClaims = selectClaims(
+    const baseRanked = {
+      claims: this.rankDocuments(repoId, query, queryEmbedding, claimDocuments, config),
+      components: this.rankDocuments(repoId, query, queryEmbedding, componentDocuments, config),
+      flows: this.rankDocuments(repoId, query, queryEmbedding, flowDocuments, config),
+    };
+    const ranked = applyGraphRanking(baseRanked, graph, config);
+    const selectedClaims = await selectClaims(
       ranked.claims,
       evidenceByClaim,
       config,
+      this.codeAnchorResolver,
+      options.repoRoot,
     );
     const selectedComponents = selectGraphObjects(
       ranked.components,
@@ -70,7 +75,7 @@ export class GraphContextBuilder {
       "flow",
       config,
     ) as FlowContextResult[];
-    const rankedResults = rankPacketResults(selectedClaims, selectedComponents, selectedFlows);
+    const rankedResults = rankPacketResults(selectedClaims, selectedComponents, selectedFlows, graph, config);
 
     return {
       query,
@@ -83,6 +88,9 @@ export class GraphContextBuilder {
       sources: selectedEvidenceSources(selectedClaims),
       debug: {
         ranked_results: rankedResults,
+        base_ranked_claims: baseRanked.claims.map((document, index) => toRankedDebugResult(document, index) as RankedContextDebugResult<Claim>),
+        base_ranked_components: baseRanked.components.map((document, index) => toRankedDebugResult(document, index) as RankedContextDebugResult<Component>),
+        base_ranked_flows: baseRanked.flows.map((document, index) => toRankedDebugResult(document, index) as RankedContextDebugResult<Flow>),
         ranked_claims: ranked.claims.map((document, index) => toRankedDebugResult(document, index) as RankedContextDebugResult<Claim>),
         ranked_components: ranked.components.map((document, index) => toRankedDebugResult(document, index) as RankedContextDebugResult<Component>),
         ranked_flows: ranked.flows.map((document, index) => toRankedDebugResult(document, index) as RankedContextDebugResult<Flow>),
@@ -213,31 +221,43 @@ function evidenceReason(metadata: Record<string, unknown> | undefined): string {
   return typeof metadata?.reason === "string" ? metadata.reason : "";
 }
 
-type ContextRelation = "primary" | "additional";
-
 function selectClaims(
   ranked: RankedContextDocument[],
   evidenceByClaim: Map<string, ClaimEvidenceResult[]>,
   config: GraphContextConfig,
-): ClaimContextResult[] {
-  return selectRankedDocuments(ranked, config, { minimumSelected: config.ranking.minimumSelectedClaims })
+  resolver: CodeAnchorResolver,
+  repoRoot: string | undefined,
+): Promise<ClaimContextResult[]> {
+  return Promise.all(selectRankedDocuments(ranked, config, { minimumSelected: config.ranking.minimumSelectedClaims })
     .sort((left, right) => right.score - left.score || left.document.key.localeCompare(right.document.key))
-    .map((document, index) => toClaimResult(document, index, evidenceByClaim));
+    .map((document, index) => toClaimResult(document, index, evidenceByClaim, resolver, repoRoot)));
 }
 
-function toClaimResult(
+async function toClaimResult(
   document: RankedContextDocument,
   index: number,
   evidenceByClaim: Map<string, ClaimEvidenceResult[]>,
-): ClaimContextResult {
+  resolver: CodeAnchorResolver,
+  repoRoot: string | undefined,
+): Promise<ClaimContextResult> {
+  const claim = document.document.object as Claim;
   return {
     rank: index + 1,
     score: roundScore(document.score),
-    signals: roundSignals(document),
-    object: document.document.object as Claim,
+    signals: roundRankedSignals(document),
+    object: claim,
     about: document.document.about,
     evidence: evidenceByClaim.get(document.document.id) ?? [],
+    code_anchors: await resolveCodeAnchors(resolver, repoRoot, claim),
   };
+}
+
+async function resolveCodeAnchors(
+  resolver: CodeAnchorResolver,
+  repoRoot: string | undefined,
+  claim: Claim,
+): Promise<ResolvedCodeAnchor[]> {
+  return resolver.resolveMany(repoRoot, claim.code_anchors);
 }
 
 function toRankedDebugResult(
@@ -247,45 +267,10 @@ function toRankedDebugResult(
   return {
     rank: index + 1,
     score: roundScore(document.score),
-    signals: roundSignals(document),
+    signals: roundRankedSignals(document),
     object: document.document.object,
     about: document.document.about,
   };
-}
-
-function relationSortValue(relation: ContextRelation): number {
-  return relation === "primary" ? 0 : 1;
-}
-
-function packetTypeSortValue(type: RankedGraphContextResult["type"]): number {
-  switch (type) {
-    case "component":
-      return 0;
-    case "flow":
-      return 1;
-    case "claim":
-      return 2;
-  }
-}
-
-function rankPacketResults(
-  claims: ClaimContextResult[],
-  components: ComponentContextResult[],
-  flows: FlowContextResult[],
-): RankedGraphContextResult[] {
-  const results: RankedGraphContextResult[] = [
-    ...components.map((component) => ({ ...component, type: "component" as const })),
-    ...flows.map((flow) => ({ ...flow, type: "flow" as const })),
-    ...claims.map((claim) => ({ ...claim, type: "claim" as const })),
-  ];
-
-  return results
-    .sort((a, b) =>
-      b.score - a.score ||
-      packetTypeSortValue(a.type) - packetTypeSortValue(b.type) ||
-      a.object.id.localeCompare(b.object.id),
-    )
-    .map((result, index) => ({ ...result, rank: index + 1 }));
 }
 
 function selectedEvidenceSources(claims: ClaimContextResult[]): Source[] {
@@ -296,105 +281,4 @@ function selectedEvidenceSources(claims: ClaimContextResult[]): Source[] {
     }
   }
   return [...sourcesById.values()].sort((a, b) => a.id.localeCompare(b.id));
-}
-
-function selectGraphObjects(
-  ranked: RankedContextDocument[],
-  claims: ClaimContextResult[],
-  type: "component" | "flow",
-  config: GraphContextConfig,
-): Array<ComponentContextResult | FlowContextResult> {
-  const results: Array<ComponentContextResult | FlowContextResult> = [];
-  for (const document of ranked) {
-    const support = claimSupport(claims, type, document.document.id, config);
-    const directScore = document.score * config.ranking.directObject.weight;
-    const directRawScore = document.signals.weighted_raw_score * config.ranking.directObject.weight;
-    const score = Math.max(directScore, support.score);
-    const passesSelection =
-      support.score >= config.ranking.selectionThreshold ||
-      document.score >= config.ranking.selectionThreshold;
-    if (!passesSelection) continue;
-    const relation: ContextRelation = document.score >= config.ranking.selectionThreshold ? "primary" : "additional";
-    if (type === "component") {
-      results.push({
-        rank: 0,
-        score: roundScore(score),
-        context_relation: relation,
-        direct_score: roundScore(directScore),
-        direct_raw_score: roundScore(directRawScore),
-        claim_support_score: roundScore(support.score),
-        claim_support_raw_score: roundScore(support.rawScore),
-        signals: roundSignals(document),
-        object: document.document.object as Component,
-        matched_claim_ids: support.claimIds,
-      });
-    } else {
-      results.push({
-        rank: 0,
-        score: roundScore(score),
-        context_relation: relation,
-        direct_score: roundScore(directScore),
-        direct_raw_score: roundScore(directRawScore),
-        claim_support_score: roundScore(support.score),
-        claim_support_raw_score: roundScore(support.rawScore),
-        signals: roundSignals(document),
-        object: document.document.object as Flow,
-        matched_claim_ids: support.claimIds,
-      });
-    }
-  }
-
-  return results
-    .sort((a, b) =>
-      relationSortValue(a.context_relation) - relationSortValue(b.context_relation) ||
-      b.score - a.score ||
-      b.matched_claim_ids.length - a.matched_claim_ids.length ||
-      a.object.id.localeCompare(b.object.id),
-    )
-    .map((result, index) => ({ ...result, rank: index + 1 }));
-}
-
-function claimSupport(
-  claims: ClaimContextResult[],
-  type: "component" | "flow",
-  id: string,
-  config: GraphContextConfig,
-): { score: number; rawScore: number; claimIds: string[] } {
-  const matched = claims.filter((claim) => claim.about.some((target) => target.type === type && target.id === id));
-  const sorted = [...matched].sort((a, b) => b.score - a.score || a.object.id.localeCompare(b.object.id));
-  const maxScore = Math.max(0, ...sorted.map((claim) => claim.score));
-  const maxRawScore = Math.max(0, ...sorted.map((claim) => claim.signals.weighted_raw_score));
-  return {
-    score: Math.min(1, maxScore * config.ranking.claimSupport.weight + sorted.length * config.ranking.claimSupport.countBoost),
-    rawScore: maxRawScore,
-    claimIds: sorted.map((claim) => claim.object.id),
-  };
-}
-
-function roundSignals(document: RankedContextDocument) {
-  return {
-    semantic_score: roundScore(document.signals.semantic_score),
-    semantic_raw_score: roundScore(document.signals.semantic_raw_score),
-    semantic_rank: document.signals.semantic_rank,
-    bm25_score: roundScore(document.signals.bm25_score),
-    bm25_raw_score: roundScore(document.signals.bm25_raw_score),
-    bm25_rank: document.signals.bm25_rank,
-    weighted_score: roundScore(document.signals.weighted_score),
-    weighted_raw_score: roundScore(document.signals.weighted_raw_score),
-    pre_coherence_score: roundScore(document.signals.pre_coherence_score),
-    graph_score: roundScore(document.signals.graph_score),
-    graph_raw_score: roundScore(document.signals.graph_raw_score),
-    graph_sources: document.signals.graph_sources.map((source) => ({
-      ...source,
-      score: roundScore(source.score),
-      raw_score: roundScore(source.raw_score),
-    })),
-    coherence_score: roundScore(document.signals.coherence_score),
-    coherence_raw_score: roundScore(document.signals.coherence_raw_score),
-    coherence_sources: document.signals.coherence_sources.map((source) => ({
-      ...source,
-      score: roundScore(source.score),
-      raw_score: roundScore(source.raw_score),
-    })),
-  };
 }

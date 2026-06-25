@@ -241,6 +241,10 @@ function boostRankedDocuments(
 function buildGraphBoostAdjacency(graph: GraphReadResult, config: GraphContextConfig): Map<string, GraphBoostEdge[]> {
   const adjacency = new Map<string, GraphBoostEdge[]>();
   for (const edge of graph.edges) {
+    if (edge.kind === "about" && edge.from_type === "claim" && (edge.to_type === "component" || edge.to_type === "flow")) {
+      addBoostEdge(adjacency, contextDocumentKey("claim", edge.from_id), contextDocumentKey(edge.to_type, edge.to_id), "about", config.ranking.graphBoost.claimAboutTarget);
+    }
+
     if (edge.kind === "touches" && edge.from_type === "flow" && edge.to_type === "component") {
       addBoostEdge(adjacency, contextDocumentKey("component", edge.to_id), contextDocumentKey("flow", edge.from_id), "touches", config.ranking.graphBoost.touchesComponentToFlow);
     }

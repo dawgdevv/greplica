@@ -1,4 +1,5 @@
 import type { Claim } from "../claim.js";
+import type { ResolvedCodeAnchor } from "../code-anchors/types.js";
 import type { Component, Flow, Source } from "../schema.js";
 
 export interface EmbeddingStatus {
@@ -45,6 +46,7 @@ export interface ClaimContextResult {
   object: Claim;
   about: Array<{ type: "component" | "flow"; id: string }>;
   evidence: ClaimEvidenceResult[];
+  code_anchors: ResolvedCodeAnchor[];
 }
 
 export interface GraphObjectContextResult<TObject> {
@@ -94,6 +96,9 @@ export interface GraphContextResult {
   sources: Source[];
   debug?: {
     ranked_results: RankedGraphContextResult[];
+    base_ranked_claims?: Array<RankedContextDebugResult<Claim>>;
+    base_ranked_components?: Array<RankedContextDebugResult<Component>>;
+    base_ranked_flows?: Array<RankedContextDebugResult<Flow>>;
     ranked_claims: Array<RankedContextDebugResult<Claim>>;
     ranked_components: Array<RankedContextDebugResult<Component>>;
     ranked_flows: Array<RankedContextDebugResult<Flow>>;
