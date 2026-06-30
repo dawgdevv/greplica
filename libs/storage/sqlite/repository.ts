@@ -42,6 +42,7 @@ type MembershipRow = {
   subject_id: string;
 };
 
+type ComponentRow = Omit<Component, "code_anchor"> & { code_anchor: string | null };
 type ClaimRow = Omit<Claim, "code_anchors"> & { code_anchors: string | null };
 type EdgeRow = Omit<Edge, "metadata"> & { metadata: string | null };
 type RepoMatch = { repo: RepoRecord; matchedBy: "remote" | "root" };
@@ -404,7 +405,11 @@ export class SqliteRepository {
   }
 
   private loadComponents(ids: string[]): Component[] {
-    return this.loadByIds<Component>("components", ids);
+    return this.loadByIds<ComponentRow>("components", ids).map((row) => ({
+      id: row.id,
+      name: row.name,
+      code_anchor: row.code_anchor ?? undefined,
+    }));
   }
 
   private loadFlows(ids: string[]): Flow[] {
