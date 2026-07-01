@@ -48,42 +48,52 @@ greplica graph view
 
 ## How It Works
 
-Greplica starts by reading your repo shallowly and pulling out the parts a future agent would otherwise have to rediscover: which area owns what, how important workflows cross files, why certain code is shaped the way it is, which constraints keep showing up, and where to look first. During setup, `greplica-bootstrap` does that first pass by reading high-signal docs, config, entrypoints, and type boundaries instead of trying to memorize the whole codebase.
+Your past agent sessions contain repo context: decisions people made, constraints agents found, files behind workflows, gotchas, and approaches that failed. Greplica keeps the durable parts so the next agent can start with that history.
 
-What it saves is plain and practical: important parts of the codebase, recurring workflows, decisions, constraints, gotchas, follow-up work, and file anchors that point the agent at the right place. Under the hood, those are stored as `components`, `flows`, and `claims`, plus sources and links between them, in a local SQLite database at `~/.greplica/graph.db` unless `GREPLICA_HOME` overrides it. Greplica validates each proposal before applying it, writes it as a new memory commit, and chains that commit to the previous one in the same repo scope.
+| Step | What happens |
+| --- | --- |
+| Past sessions | Agents uncover repo-specific decisions, constraints, workflows, and file anchors. |
+| Greplica stores it | Greplica saves the durable parts as `components`, `flows`, `claims`. |
+| New agent asks | The agent runs `greplica graph context "<question>"` before broad exploration. |
+| Agent uses it | The agent starts with facts, target files, subsystem boundaries, prior decisions. |
+| Memory updates | Hooks or `greplica-update-working-memory` save useful new learnings after work sessions. |
 
-That first pass is only the start. If you have useful old sessions, `greplica-fast-session-bootstrap` can read a bundled transcript and save the parts that should survive beyond chat history: durable decisions, gotchas, rejected approaches, and follow-up work. After normal work sessions, hooks can remind the agent to query Greplica early and, if you enabled auto-save, try a background update after enough activity. If hooks are unavailable or you want to do it manually, `greplica-update-working-memory` saves the durable learnings from the current session without turning the whole transcript into clutter.
+If you have old sessions, `greplica-fast-session-bootstrap` can ingest bundled transcripts during setup. That gives Greplica useful memory on day one.
 
-When the next agent starts a task, it asks Greplica a focused question with `greplica graph context "<question>"`. Greplica compares that question against what it has already saved, combines embeddings, keyword scoring, and relationship boosts, and returns the most relevant decisions, workflows, and code locations as Markdown the agent can act on immediately. The agent still reads code, but it starts from the right files and with the right constraints in mind instead of grepping from scratch.
+For example, a future task might ask about sync auth in a browser extension. The agent can start with:
 
-A result can look like this:
+```bash
+greplica graph context "google sync auth startup identity browser settings"
+```
+
+Greplica returns a small Markdown packet the agent can act on:
 
 ```markdown
 # Graph Context
 
-## Components
+## Best Claims
 
-- `component.knowledge_graph_service` Knowledge Graph Service
-  Anchor: `libs/knowledge-graph/service.ts`
-- `component.sqlite_repository` SQLite Repository
-  Anchor: `libs/storage/sqlite/repository.ts`
+### claim.sync_auth_mode_startup
+The sync service checks auth mode during startup before enabling Google Drive sync.
 
-## Flows
+Anchor: `src/background/sync-service.ts`
 
-### Proposal Apply
+### claim.edge_identity_gap
+Edge does not expose the same Google identity API behavior as Chrome.
 
-ID: `flow.proposal_apply`
+Anchor: `src/platform/browser-identity.ts`
 
-Claims:
-- `claim.apply_validates_before_writing` (fact, code_verified): applyProposal validates the proposal before writing any records.
-- `claim.memory_commits_chain_with_parent` (fact, code_verified): Each memory commit stores a reference to its predecessor.
+## Related Flows
 
-## Other Relevant Claims
-
-- `claim.apply_prints_commit_scope_and_counts` (fact, code_verified): proposal apply prints the memory commit ID, scope ID, and created object counts.
+- `flow.sync_startup`: startup settings, auth checks, and sync-service initialization.
+- `flow.browser_identity`: browser-specific identity API behavior.
 ```
 
-That is the loop Greplica is trying to tighten: read the repo once, keep the useful parts, bring them back when an agent asks, then keep refining them as work continues.
+### How this helps the agent
+
+At task start, the agent gets a target list: the sync service, browser identity wrapper, startup flow, and the prior constraints that matter. It reads the current code before changing anything, but it verifies the right area first.
+
+That saves the work agents repeat across sessions: broad `rg` searches, adjacent module reads to infer ownership, and rediscovery of decisions a previous session found. This makes your agent more reliable, and leads to it generating better plans.
 
 ---
 
@@ -91,15 +101,17 @@ That is the loop Greplica is trying to tighten: read the repo once, keep the use
 
 We also benchmark Greplica on held-out planning tasks built from [SWE-chat](https://www.swe-chat.com/), a dataset of real coding-agent sessions from public repositories ([dataset](https://huggingface.co/datasets/SALT-NLP/SWE-chat), [paper](https://arxiv.org/abs/2604.20779)).
 
-For each case, we start from a clean base snapshot of the repo, use 2-4 earlier sessions from that same repo to build Greplica context, and then run the same held-out planning task in two modes: a baseline run with no Greplica context, and a Greplica run where the agent can query `greplica graph context` during the task. Greplica context is created with one bootstrap pass plus replayed session updates, so the agent starts from the kind of saved repo-specific decisions and workflow knowledge that real teams build up over time.
+For each case, we start from a clean base snapshot of the repo and use 2-4 earlier sessions from that same repo to build Greplica context. Then we run the same held-out planning task in two modes: a baseline run with no Greplica context, and a Greplica run where the agent can query `greplica graph context` during the task. One bootstrap pass plus replayed session updates gives the agent saved repo-specific decisions and workflow knowledge.
 
-Across the showcased planning cases, Greplica often cuts token usage by roughly 40-50% and can reduce wall-clock time by around 30%. It can also improve the result itself: in the stronger cases, the agent produces a better plan because it starts with the right repo-specific constraints, decisions, and subsystem boundaries instead of rediscovering them late. In the strongest run we measured, Greplica used 75.0% fewer tokens and finished about 38% faster.
+In several showcased planning cases, Greplica cut token usage by 40-50%. Stronger runs saved wall-clock time. Greplica improved the plan when the task depended on repo-specific constraints, decisions, and subsystem boundaries. In the strongest run we measured, Greplica used 75.0% fewer tokens and finished about 38% faster.
 
-Current showcase examples:
+Current showcase rows:
 
-- `swechat-gemini-voyager-sync-auth-bug` hardened rerun: score `100 -> 100`, `75.0%` fewer tokens, `140.4s` faster.
-- `swechat-iptvnator-playback-layout-plan`: score `64 -> 100`, `44.6%` fewer tokens.
-- `swechat-marin-harbor-swe-eval-support`: score `6 -> 100`, `26.7%` fewer tokens, `80.2s` faster.
+| Case | Score | Tokens | Tokens Saved | Time Saved | Why It Helped |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Gemini Voyager sync/auth hardened | `100 -> 100` | `1,925,152 -> 480,988` | `1,444,164` fewer, `75.0%` | `140.4s` | Memory surfaced sync auth, startup, browser identity, and settings constraints. |
+| IPTVnator playback layout | `64 -> 100` | `1,592,080 -> 881,541` | `710,539` fewer, `44.6%` | `65s` | Memory pointed at player, workspace, playlist, and radio layout boundaries. |
+| Marin Harbor SWE eval support | `6 -> 100` | `2,992,034 -> 2,193,023` | `799,011` fewer, `26.7%` | `80.2s` | Memory surfaced vendored Harbor, mini-swe-agent compatibility, and validation constraints. |
 
 ---
 
