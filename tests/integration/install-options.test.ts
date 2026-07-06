@@ -27,6 +27,7 @@ function installInTempRepo(tmp: string, name: string, flags: string[], platform 
   const greplicaHome = join(tmp, name, 'greplica-home');
   const codexHome = join(tmp, name, 'codex-home');
   const copilotHome = join(tmp, name, 'copilot-home');
+  const xdgConfigHome = join(tmp, name, 'xdg-config-home');
   mkdirSync(repo, { recursive: true });
   execFileSync('git', ['init', '--quiet'], { cwd: repo, encoding: 'utf8' });
 
@@ -35,7 +36,7 @@ function installInTempRepo(tmp: string, name: string, flags: string[], platform 
     GREPLICA_HOME: greplicaHome,
     CODEX_HOME: codexHome,
     COPILOT_HOME: copilotHome,
-    XDG_CONFIG_HOME: join(tmp, name, 'xdg-config-home'),
+    XDG_CONFIG_HOME: xdgConfigHome,
     GREPLICA_INSTALL_SKIP_PREWARM: '1',
   };
 
@@ -46,7 +47,7 @@ function installInTempRepo(tmp: string, name: string, flags: string[], platform 
   });
 
   execFileSync(process.execPath, [cli, 'doctor'], { cwd: repo, encoding: 'utf8', env });
-  return { repo, greplicaHome, codexHome, copilotHome, output, env };
+  return { repo, greplicaHome, codexHome, copilotHome, xdgConfigHome, output, env };
 }
 
 describe('install options', () => {
@@ -98,13 +99,15 @@ describe('install options', () => {
     expect(readConfig(noHooks.greplicaHome).session.autoMemoryUpdates).toBe(false);
   });
 
-  test('opencode does not support hooks but installs skills', () => {
+  test('opencode installs hooks and enables auto memory updates', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'greplica-install-options-test-'));
-    const unsupportedHooks = installInTempRepo(tmp, 'unsupported-hooks', ['--hooks', 'enabled', '--auto-memory', 'enabled'], 'opencode');
+    const opencodeHooks = installInTempRepo(tmp, 'opencode-hooks', ['--hooks', 'enabled', '--auto-memory', 'enabled'], 'opencode');
 
-    expect(unsupportedHooks.output).toMatch(/Hooks: not installed for this platform\./);
-    expect(unsupportedHooks.output).toMatch(/Automatic memory updates: disabled\./);
-    expect(readConfig(unsupportedHooks.greplicaHome).session.autoMemoryUpdates).toBe(false);
+    expect(opencodeHooks.output).toMatch(/Installed Greplica for OpenCode\./);
+    expect(opencodeHooks.output).toMatch(/Hooks: installed for UserPromptSubmit, Stop\./);
+    expect(opencodeHooks.output).toMatch(/Automatic memory updates: enabled\./);
+    expect(existsSync(join(opencodeHooks.xdgConfigHome, 'opencode', 'hooks.json'))).toBe(true);
+    expect(readConfig(opencodeHooks.greplicaHome).session.autoMemoryUpdates).toBe(true);
   });
 
   test('copilot installs hooks and enables auto memory updates', () => {

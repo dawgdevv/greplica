@@ -1,8 +1,8 @@
 import { describe, test, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
@@ -159,16 +159,52 @@ describe('transcript bundle', () => {
     ).toThrow(/Transcript file does not exist/);
   });
 
-  test('errors on unsupported opencode platform', () => {
+  test('bundles opencode transcripts and strips system instructions', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'greplica-transcript-bundle-test-'));
-    const codexOne = join(tmp, 'opencode-one.jsonl');
-    writeFileSync(codexOne, '{}', 'utf8');
-    expect(() =>
-      execFileSync(
-        process.execPath,
-        [cli, 'transcript', 'bundle', '--platform', 'opencode', '--file', codexOne, '--out', join(tmp, 'opencode-bundle.md')],
-        { encoding: 'utf8', stdio: 'pipe' },
-      ),
-    ).toThrow(/OpenCode transcript projection is not supported yet/);
+    const opencodeDataHome = join(tmp, 'opencode-data');
+    const opencodeSessionId = 'opencode-session-one';
+    const opencodeSessionFile = join(opencodeDataHome, 'opencode', 'storage', 'session', `${opencodeSessionId}.json`);
+    const opencodeOut = join(tmp, 'opencode-bundle.md');
+
+    mkdirSync(dirname(opencodeSessionFile), { recursive: true });
+    mkdirSync(join(opencodeDataHome, 'opencode', 'storage', 'message', opencodeSessionId), { recursive: true });
+
+    writeFileSync(
+      opencodeSessionFile,
+      JSON.stringify({ id: opencodeSessionId, directory: '/repo/example' }),
+      'utf8',
+    );
+    writeFileSync(
+      join(opencodeDataHome, 'opencode', 'storage', 'message', opencodeSessionId, 'msg-01.json'),
+      JSON.stringify({
+        role: 'user',
+        content: 'Remember this durable OpenCode insight. <system_instruction>remove this</system_instruction>',
+        time: '2026-06-25T00:06:00.000Z',
+      }),
+      'utf8',
+    );
+    writeFileSync(
+      join(opencodeDataHome, 'opencode', 'storage', 'message', opencodeSessionId, 'msg-02.json'),
+      JSON.stringify({
+        role: 'assistant',
+        parts: [{ text: 'An OpenCode assistant fact.' }],
+        time: '2026-06-25T00:07:00.000Z',
+      }),
+      'utf8',
+    );
+
+    const output = execFileSync(
+      process.execPath,
+      [cli, 'transcript', 'bundle', '--platform', 'opencode', '--file', opencodeSessionFile, '--out', opencodeOut],
+      { encoding: 'utf8', env: { ...process.env, XDG_DATA_HOME: opencodeDataHome } },
+    );
+
+    const bundle = readFileSync(opencodeOut, 'utf8');
+
+    expect(output).toMatch(/opencode-session:opencode-session-one/);
+    expect(bundle).toMatch(/session_ref: opencode-session:opencode-session-one/);
+    expect(bundle).toMatch(/Remember this durable OpenCode insight/);
+    expect(bundle).toMatch(/An OpenCode assistant fact/);
+    expect(bundle).not.toMatch(/remove this/);
   });
 });
