@@ -6,6 +6,5 @@
     "rootDir": ".",
     "declaration": true,
     "sourceMap": true
-  },
-  "exclude": ["tests", "node_modules"]
+  }
 }
