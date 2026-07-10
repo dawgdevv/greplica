@@ -69,7 +69,7 @@ describe("anchor drift", () => {
       return result.drifted.map((issue) => issue.claim_id);
     }
 
-    expect(await driftedIds("def foo():\n    # the configured threshold value\n    return 3\n")).toEqual([]);
+    expect(await driftedIds("def foo():\n    # returns the configured threshold value\n    return 3\n")).toEqual([]);
   });
 
   test("whitespace-only edits do not drift", async () => {
